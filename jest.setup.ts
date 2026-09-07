@@ -18,12 +18,6 @@ if (typeof globalThis.TextDecoder === "undefined") {
   globalThis.TextDecoder = TextDecoder as typeof TextDecoder;
 }
 
-// Ensure a full WebCrypto implementation is available (with `subtle`).
-// Some environments (e.g. jsdom) expose a global `crypto` that lacks
-// `subtle`, and `globalThis.crypto` is configurable but not writable, so
-// reassigning directly would throw. Redefine it so PBKDF2/AES-GCM work.
-if (!globalThis.crypto?.subtle) {
-if (typeof globalThis.crypto === "undefined" || !globalThis.crypto.subtle) {
 // Some jsdom versions ship a `crypto` global without `subtle`; the encryption
 // helpers need the full WebCrypto API, so replace it whenever subtle is missing.
 // Plain assignment is not enough — the global can be an accessor — so we use

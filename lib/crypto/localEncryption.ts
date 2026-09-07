@@ -109,13 +109,6 @@ const SALT_HEX_LENGTH = SALT_LENGTH * 2;
 export async function decryptData<T>(encryptedData: string, passphrase: string): Promise<T> {
   const combined = Uint8Array.from(atob(encryptedData), c => c.charCodeAt(0));
 
-  // `generateSalt` returns a hex string of `SALT_LENGTH * 2` characters, and
-  // `encryptData` stores it UTF-8 encoded (one byte per char), so the salt
-  // occupies `SALT_LENGTH * 2` bytes of the combined buffer.
-  const saltBytes = SALT_LENGTH * 2;
-  const salt = new TextDecoder().decode(combined.slice(0, saltBytes));
-  const iv = combined.slice(saltBytes, saltBytes + IV_LENGTH);
-  const encrypted = combined.slice(saltBytes + IV_LENGTH);
   // generateSalt() returns a hex string (2 chars per salt byte), which is what
   // encryptData() writes into the combined payload. SALT_LENGTH is the raw byte
   // count, so the hex representation occupies SALT_LENGTH * 2 UTF-8 bytes.
