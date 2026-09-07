@@ -96,6 +96,9 @@ describe("Offline Sync & Queue (#6)", () => {
   });
 
   it("shows the offline banner immediately after going offline", () => {
+    // Wait for the dashboard to finish hydrating before flipping connectivity;
+    // goOffline keeps re-dispatching until OfflineProvider is listening.
+    cy.get("#quick-action-send").should("exist");
     cy.goOffline();
     cy.contains("You are currently offline.").should("exist");
   });

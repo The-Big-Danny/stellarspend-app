@@ -83,13 +83,19 @@ Cypress.Commands.add("disconnectWallet", () => {
 
 Cypress.Commands.add("goOffline", () => {
   // Dispatch as a native Event so the addEventListener handlers in
-  // OfflineProvider fire correctly.
+  // OfflineProvider fire correctly. Keep dispatching until the banner is
+  // visible: on a slow first load the app may not have hydrated (and attached
+  // its listeners) when the first dispatch fires, so a single one-shot event
+  // can be lost. cy.contains retries the assertion underneath, so the banner
+  // appears as soon as the listener is live.
   cy.window().then((win) => {
-    win.dispatchEvent(new Event("offline"));
+    const timer = setInterval(() => {
+      win.dispatchEvent(new Event("offline"));
+    }, 250);
+    cy.contains("You are currently offline.").should("exist").then(() => {
+      clearInterval(timer);
+    });
   });
-  // Wait for the OfflineBanner to appear, which guarantees React has
-  // finished re-rendering with isOnline=false before the next command.
-  cy.contains("You are currently offline.").should("exist");
 });
 
 Cypress.Commands.add("goOnline", () => {
