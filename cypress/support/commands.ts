@@ -105,12 +105,57 @@ Cypress.Commands.add("mockStellarAPI", () => {
     cy.intercept("GET", "**/accounts/**", {
       statusCode: 200,
       body: {
+        _links: {
+          self: { href: `https://horizon-testnet.stellar.org/accounts/${MOCK_PUBLIC_KEY}` },
+        },
         id: MOCK_PUBLIC_KEY,
-        balances: [{ asset_type: "native", balance: "10000.0000000" }],
+        account_id: MOCK_PUBLIC_KEY,
+        sequence: "47265245278912432",
+        subentry_count: 0,
+        last_modified_ledger: 452,
+        thresholds: { low_threshold: 0, med_threshold: 0, high_threshold: 0 },
+        flags: { auth_required: false, auth_revocable: false, auth_immutable: false },
+        balances: [
+          {
+            balance: "10000.0000000",
+            limit: "922337203685.4775807",
+            buying_liabilities: "0.0000000",
+            selling_liabilities: "0.0000000",
+            is_authorized: true,
+            asset_type: "native",
+          },
+        ],
+        signers: [
+          {
+            weight: 1,
+            key: MOCK_PUBLIC_KEY,
+            type: "ed25519_public_key",
+          },
+        ],
+        data: {},
+        data_attr: {},
       },
     }).as("getAccount");
 
-    cy.intercept("GET", "**/transactions**", {
+    // Single-transaction lookups (e.g. the confirmation poll performed after a
+    // payment is submitted: GET /transactions/:hash) return one record.
+    cy.intercept("GET", "**/transactions/*", {
+      statusCode: 200,
+      body: {
+        id: "mock-tx-hash",
+        hash: "mock-tx-hash",
+        created_at: "2026-02-28T09:00:01Z",
+        successful: true,
+        fee_charged: "100",
+        ledger_attr: 1,
+        operation_count: 1,
+        source_account: MOCK_PUBLIC_KEY,
+        operations: [],
+      },
+    }).as("getTransaction");
+
+    // Transaction list queries (GET /transactions?...) return an embedded set.
+    cy.intercept("GET", "**/transactions?*", {
       statusCode: 200,
       body: { _embedded: { records: [transaction] } },
     }).as("getTransactions");

@@ -10,8 +10,12 @@
  * wallets.
  */
 
-import { useCallback, useState, useRef } from "react";
-import { useWalletContext, Wallet } from "@/context/WalletContext";
+import { useCallback } from "react";
+import {
+  useWalletContext,
+  type Wallet,
+  type WalletProviderState,
+} from "@/context/WalletContext";
 import {
   getProvider,
   type WalletProvider,
@@ -30,16 +34,9 @@ import type {
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-export interface WalletProviderState {
-  /** The provider currently connected (if any). */
-  providerId: WalletProviderId | null;
-  isInstalled: boolean;
-  isConnected: boolean;
-  publicKey: string | null;
-  isConnecting: boolean;
-  /** Named walletError to avoid clash with wallet context `error`. */
-  walletError: string | null;
-}
+// The shared connection state now lives in WalletContext so the navbar and any
+// payment surface observe the same connection. Re-exported for compatibility.
+export type { WalletProviderState } from "@/context/WalletContext";
 
 export interface SendPaymentInput {
   destination: string;
@@ -93,93 +90,44 @@ export interface UseWalletReturn {
  */
 export function useWallet(): UseWalletReturn {
   const context = useWalletContext();
+  const {
+    wallets,
+    selectedWallet,
+    isLoading,
+    error,
+    addWallet,
+    removeWallet,
+    selectWallet,
+    updateWalletBalance,
+    updateWalletName,
+    setDefaultWallet,
+    refreshBalances,
+    walletProvider,
+    connectWalletProvider,
+    disconnectWalletProvider,
+  } = context;
+  const providerState: WalletProviderState = walletProvider;
 
-  const [providerState, setProviderState] = useState<WalletProviderState>({
-    providerId: null,
-    isInstalled: false,
-    isConnected: false,
-    publicKey: null,
-    isConnecting: false,
-    walletError: null,
-  });
-
-  // Keep a reference to the active provider for direct access (e.g. signing).
-  const activeProviderRef = useRef<WalletProvider | null>(null);
-
-  // ── Generic connect ───────────────────────────────────────────────────────
+  // ── Generic connect (delegates to the shared context) ────────────────────
 
   const connectProvider = useCallback(
-    async (providerId: WalletProviderId = "freighter") => {
-      const provider = getProvider(providerId);
-      const installed = await provider.isAvailable().catch(() => false);
-
-      if (!installed && provider.getMeta().kind !== "web") {
-        setProviderState({
-          providerId,
-          isInstalled: false,
-          isConnected: false,
-          publicKey: null,
-          isConnecting: false,
-          walletError: `${provider.getMeta().name} not found. Install ${
-            provider.getMeta().kind === 'extension' ? 'the extension' : 'it'
-          } to continue.`,
-        });
-        return;
-      }
-
-      setProviderState({
-        providerId,
-        isInstalled: installed,
-        isConnected: false,
-        publicKey: null,
-        isConnecting: true,
-        walletError: null,
-      });
-
-      try {
-        const publicKey = await provider.connect();
-        if (!publicKey) throw new Error("No public key returned.");
-
-        activeProviderRef.current = provider;
-
-        setProviderState({
-          providerId,
-          isInstalled: true,
-          isConnected: true,
-          publicKey,
-          isConnecting: false,
-          walletError: null,
-        });
-      } catch (err) {
-        const message =
-          err instanceof Error ? err.message : "Failed to connect wallet.";
-        setProviderState({
-          providerId,
-          isInstalled: installed,
-          isConnected: false,
-          publicKey: null,
-          isConnecting: false,
-          walletError: message,
-        });
-      }
-    },
-    [],
+    (providerId?: WalletProviderId) => connectWalletProvider(providerId),
+    [connectWalletProvider],
   );
 
-  const disconnectProvider = useCallback(() => {
-    activeProviderRef.current?.disconnect();
-    activeProviderRef.current = null;
-    setProviderState({
-      providerId: null,
-      isInstalled: false,
-      isConnected: false,
-      publicKey: null,
-      isConnecting: false,
-      walletError: null,
-    });
-  }, []);
+  const disconnectProvider = useCallback(
+    () => disconnectWalletProvider(),
+    [disconnectWalletProvider],
+  );
 
-  const getActiveProvider = useCallback(() => activeProviderRef.current, []);
+  const getActiveProvider = useCallback((): WalletProvider | null => {
+    if (!providerState.isConnected || !providerState.providerId) return null;
+    try {
+      return getProvider(providerState.providerId);
+    } catch {
+      return null;
+    }
+  }, [providerState.isConnected, providerState.providerId]);
 
   // ── sendPayment: delegates to submitPaymentTransaction ─────────────────
 
@@ -203,29 +151,29 @@ export function useWallet(): UseWalletReturn {
     [providerState.publicKey],
   );
 
-  // ── Legacy Freighter helpers (delegate to generic connect) ────────────────
+  // ── Legacy Freighter helpers (delegate to the shared context) ─────────────
 
   const connectFreighter = useCallback(
-    () => connectProvider("freighter"),
-    [connectProvider],
+    () => connectWalletProvider("freighter"),
+    [connectWalletProvider],
   );
 
   const disconnectFreighter = useCallback(
-    () => disconnectProvider(),
-    [disconnectProvider],
+    () => disconnectWalletProvider(),
+    [disconnectWalletProvider],
   );
 
   const getWalletById = useCallback(
-    (id: string) => context.wallets.find((w) => w.id === id),
-    [context.wallets]
+    (id: string) => wallets.find((w) => w.id === id),
+    [wallets]
   );
 
   const getWalletByAddress = useCallback(
     (address: string) =>
-      context.wallets.find(
+      wallets.find(
         (w) => w.address.toLowerCase() === address.toLowerCase()
       ),
-    [context.wallets]
+    [wallets]
   );
 
   const formatAddress = useCallback(
@@ -237,7 +185,7 @@ export function useWallet(): UseWalletReturn {
   );
 
   const getTotalBalance = useCallback(() => {
-    return context.wallets.reduce(
+    return wallets.reduce(
       (acc, w) => ({
         xlm: (parseFloat(acc.xlm) + (parseFloat(w.balance.xlm) || 0)).toFixed(2),
         usdc: (parseFloat(acc.usdc) + (parseFloat(w.balance.usdc || "0") || 0)).toFixed(2),
@@ -245,20 +193,20 @@ export function useWallet(): UseWalletReturn {
       }),
       { xlm: "0.00", usdc: "0.00", eurc: "0.00" }
     );
-  }, [context.wallets]);
+  }, [wallets]);
 
   return {
-    wallets: context.wallets,
-    selectedWallet: context.selectedWallet,
-    isLoading: context.isLoading,
-    error: context.error,
-    addWallet: context.addWallet,
-    removeWallet: context.removeWallet,
-    selectWallet: context.selectWallet,
-    updateWalletBalance: context.updateWalletBalance,
-    updateWalletName: context.updateWalletName,
-    setDefaultWallet: context.setDefaultWallet,
-    refreshBalances: context.refreshBalances,
+    wallets,
+    selectedWallet,
+    isLoading,
+    error,
+    addWallet,
+    removeWallet,
+    selectWallet,
+    updateWalletBalance,
+    updateWalletName,
+    setDefaultWallet,
+    refreshBalances,
     // New generic provider state
     walletProvider: providerState,
     connectProvider,
