@@ -11,6 +11,26 @@ import {
   setPassphraseSet,
   resetEncryption,
 } from "../lib/crypto/localEncryption";
+import {
+  getProvider,
+  type WalletProviderId,
+} from "../lib/wallet-providers";
+
+/**
+ * Connection state for the active wallet provider (Freighter, Ledger, xBull,
+ * Albedo). Kept in context so every consumer — the navbar connect button,
+ * send-payment modals, goal forms, etc. — observes the same connection.
+ */
+export interface WalletProviderState {
+  /** The provider currently connected (if any). */
+  providerId: WalletProviderId | null;
+  isInstalled: boolean;
+  isConnected: boolean;
+  publicKey: string | null;
+  isConnecting: boolean;
+  /** Named walletError to avoid clash with wallet context `error`. */
+  walletError: string | null;
+}
 
 export interface Wallet {
   id: string;
@@ -43,6 +63,11 @@ export interface WalletContextType {
   isUnlocked: boolean;
   error: string | null;
   passphraseSet: boolean;
+  // Shared wallet-provider connection state (connect/disconnect in one place
+  // so the navbar and payment modals stay in sync).
+  walletProvider: WalletProviderState;
+  connectWalletProvider: (providerId?: WalletProviderId) => Promise<void>;
+  disconnectWalletProvider: () => void;
   addWallet: (wallet: Omit<Wallet, "id" | "createdAt">) => void;
   removeWallet: (id: string) => void;
   selectWallet: (id: string) => void;
@@ -112,6 +137,93 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
   const [error, setError] = useState<string | null>(null);
   const [passphraseSet, setPassphraseSetState] = useState(isPassphraseSet());
   const [sessionPassphrase, setSessionPassphrase] = useState<string | null>(null);
+  const [walletProvider, setWalletProvider] = useState<WalletProviderState>({
+    providerId: null,
+    isInstalled: false,
+    isConnected: false,
+    publicKey: null,
+    isConnecting: false,
+    walletError: null,
+  });
+
+  // Connect a wallet provider (Freighter, Ledger, xBull, Albedo) and share the
+  // result with every consumer through context.
+  const connectWalletProvider = useCallback(
+    async (providerId: WalletProviderId = "freighter") => {
+      const provider = getProvider(providerId);
+      const installed = await provider.isAvailable().catch(() => false);
+
+      if (!installed && provider.getMeta().kind !== "web") {
+        setWalletProvider({
+          providerId,
+          isInstalled: false,
+          isConnected: false,
+          publicKey: null,
+          isConnecting: false,
+          walletError: `${provider.getMeta().name} not found. Install ${
+            provider.getMeta().kind === "extension" ? "the extension" : "it"
+          } to continue.`,
+        });
+        return;
+      }
+
+      setWalletProvider({
+        providerId,
+        isInstalled: installed,
+        isConnected: false,
+        publicKey: null,
+        isConnecting: true,
+        walletError: null,
+      });
+
+      try {
+        const publicKey = await provider.connect();
+        if (!publicKey) throw new Error("No public key returned.");
+
+        setWalletProvider({
+          providerId,
+          isInstalled: true,
+          isConnected: true,
+          publicKey,
+          isConnecting: false,
+          walletError: null,
+        });
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : "Failed to connect wallet.";
+        setWalletProvider({
+          providerId,
+          isInstalled: installed,
+          isConnected: false,
+          publicKey: null,
+          isConnecting: false,
+          walletError: message,
+        });
+      }
+    },
+    [],
+  );
+
+  const disconnectWalletProvider = useCallback(() => {
+    setWalletProvider((current) => {
+      if (current.providerId) {
+        try {
+          getProvider(current.providerId).disconnect();
+        } catch {
+          // Ignore provider teardown failures; the connection state is cleared
+          // regardless.
+        }
+      }
+      return {
+        providerId: null,
+        isInstalled: false,
+        isConnected: false,
+        publicKey: null,
+        isConnecting: false,
+        walletError: null,
+      };
+    });
+  }, []);
 
   // Load wallets from localStorage on mount
   const loadWallets = useCallback(async (passphrase?: string) => {
@@ -448,6 +560,9 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     isUnlocked,
     error,
     passphraseSet,
+    walletProvider,
+    connectWalletProvider,
+    disconnectWalletProvider,
     addWallet,
     removeWallet,
     selectWallet,
